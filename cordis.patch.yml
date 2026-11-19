@@ -1,0 +1,4 @@
+- insert:
+    - id: ai-radar
+      name: 'dsh-ai-radar'
+      config: {}

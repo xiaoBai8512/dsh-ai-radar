@@ -1,0 +1,9 @@
+node_modules/
+*.tgz
+.env
+.env.*
+.npmrc
+.DS_Store
+*.log
+state.json
+storages/

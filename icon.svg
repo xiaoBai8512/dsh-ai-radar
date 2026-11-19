@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="AI radar">
+  <defs>
+    <linearGradient id="air-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1c2b4a"/>
+      <stop offset="1" stop-color="#0b1220"/>
+    </linearGradient>
+    <linearGradient id="air-sweep" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#4dd6a1" stop-opacity="0.05"/>
+      <stop offset="1" stop-color="#4dd6a1" stop-opacity="0.75"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="15" fill="url(#air-bg)"/>
+  <g fill="none" stroke="#4dd6a1" stroke-opacity="0.55" stroke-width="1.4">
+    <circle cx="32" cy="32" r="20"/>
+    <circle cx="32" cy="32" r="13"/>
+    <circle cx="32" cy="32" r="6"/>
+    <path d="M32 8v6M32 50v6M8 32h6M50 32h6"/>
+  </g>
+  <path d="M32 32 L32 12 A20 20 0 0 1 46.4 20.3 Z" fill="url(#air-sweep)"/>
+  <circle cx="39.5" cy="22.5" r="2.6" fill="#4dd6a1"/>
+  <circle cx="25" cy="38" r="1.8" fill="#8fb7ff"/>
+</svg>
