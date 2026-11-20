@@ -1,6 +1,7 @@
 /** Host half of AI Radar: fetch, score, persist, and serve the daily digest. */
 
-import { normalizeConfig } from './src/config.js'
+import { applyIndustry, normalizeConfig } from './src/config.js'
+import { normalizeIndustry, saveIndustry } from './src/industry.js'
 import { buildDigest } from './src/digest.js'
 import { runEditor } from './src/editor.js'
 import { accumulateQuestions, clusterQuestions } from './src/questions.js'
@@ -26,8 +27,38 @@ function sendJson(res, status, value) {
   res.end(body)
 }
 
+/** Read a small JSON body; anything bigger than 64 KB is a mistake, not a pack. */
+const readJson = (req, limit = 64 * 1024) =>
+  new Promise((resolve) => {
+    const chunks = []
+    let size = 0
+    let settled = false
+    const done = (value) => {
+      if (settled) return
+      settled = true
+      resolve(value)
+    }
+    req.on('data', (chunk) => {
+      size += chunk.length
+      if (size > limit) {
+        done(undefined)
+        req.destroy()
+        return
+      }
+      chunks.push(chunk)
+    })
+    req.on('end', () => {
+      try {
+        done(JSON.parse(Buffer.concat(chunks).toString('utf8')))
+      } catch {
+        done(undefined)
+      }
+    })
+    req.on('error', () => done(undefined))
+  })
+
 export function apply(ctx, rawConfig) {
-  const config = normalizeConfig(rawConfig)
+  let config = normalizeConfig(rawConfig)
   const state = loadState(config)
   const log = (message) => {
     try {
@@ -49,6 +80,14 @@ export function apply(ctx, rawConfig) {
     progress,
     error: lastError,
     accounts: config.accounts.map((account) => ({ handle: account.handle, tier: account.tier, label: account.label })),
+    industry: {
+      id: config.industry.id,
+      label: config.industry.label,
+      keywords: config.industry.keywords,
+      brands: config.industry.brands,
+      questionSeeds: config.industry.questionSeeds,
+      hn: { enabled: config.hn, queries: config.hnQueries },
+    },
     threshold: config.minScore,
     editor: config.editor,
     editorState: state.lastSummary?.editor ?? null,
@@ -153,6 +192,26 @@ export function apply(ctx, rawConfig) {
     }
   }
 
+  /**
+   * Switching vertical invalidates everything that is vertical-specific: the
+   * published digest, the seen ledger, the term vocabulary, cached timelines and
+   * the question pool. Keeping any of it would mix two industries in one card.
+   */
+  const resetForIndustry = () => {
+    state.digest = []
+    state.lastSummary = null
+    state.seen = []
+    state.terms = {}
+    state.accounts = {}
+    state.questionPool = []
+    state.questionClusters = []
+    state.questionOverall = ''
+    state.questionsAt = null
+    state.questionError = null
+    state.questionPosts = {}
+    state.lastRefreshAt = null
+  }
+
   const refresh = (reason, force) => {
     if (running !== null) return running
     const began = Date.now()
@@ -250,10 +309,36 @@ export function apply(ctx, rawConfig) {
       path: ROUTE,
       handler: async (req, res) => {
         const pathname = new URL(req.url ?? '/', 'http://localhost').pathname
-        req.resume()
+        // The industry route reads its body; every other route only drains it.
+        if (pathname !== `${ROUTE}/industry`) req.resume()
         if (pathname === `${ROUTE}/digest`) {
           if (req.method !== 'GET' && req.method !== 'HEAD') return sendJson(res, 405, { error: 'method-not-allowed' })
           return sendJson(res, 200, snapshot())
+        }
+        if (pathname === `${ROUTE}/industry`) {
+          if (req.method === 'GET') return sendJson(res, 200, { industry: snapshot().industry })
+          if (req.method !== 'POST') return sendJson(res, 405, { error: 'method-not-allowed' })
+          const body = await readJson(req)
+          if (!body || typeof body !== 'object') return sendJson(res, 400, { error: 'bad-json' })
+          const pack = normalizeIndustry({ ...body, id: body.id ?? 'custom' })
+          if (pack.accounts.length === 0) return sendJson(res, 400, { error: 'no-accounts' })
+          if (pack.keywords.length === 0) return sendJson(res, 400, { error: 'no-keywords' })
+          try {
+            saveIndustry(config, pack)
+          } catch (error) {
+            lastError = `pack save failed: ${error?.message ?? String(error)}`
+            return sendJson(res, 500, { error: lastError })
+          }
+          config = applyIndustry(config, pack)
+          resetForIndustry()
+          try {
+            saveState(config, state)
+          } catch {
+            /* the refresh below saves again */
+          }
+          log(`industry switched: ${config.industry.label} (${config.accounts.length} sources, ${config.industry.keywords.length} keywords)`)
+          refresh('industry', true)
+          return sendJson(res, 202, { saved: true, state: snapshot() })
         }
         if (pathname === `${ROUTE}/refresh`) {
           if (req.method !== 'POST') return sendJson(res, 405, { error: 'method-not-allowed' })
@@ -297,5 +382,5 @@ export function apply(ctx, rawConfig) {
     return () => clearTimeout(timer)
   })
 
-  log(`ready: ${config.accounts.length} accounts, refresh at ${config.refreshHour}:00, threshold ${config.minScore}`)
+  log(`ready: ${config.industry.label}, ${config.accounts.length} accounts, refresh at ${config.refreshHour}:00, threshold ${config.minScore}`)
 }

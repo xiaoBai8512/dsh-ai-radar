@@ -1,8 +1,8 @@
 {
   "name": "dsh-ai-radar",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
-  "description": "AI news digest and recurring questions from X and Hacker News in the DeepSeek Harness sidebar.",
+  "description": "Sidebar digest for any industry: posts from X (and Hacker News for tech), an LLM editorial pass, and the recurring questions in the replies. The industry, keywords and sources are editable in the panel.",
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
@@ -32,6 +32,7 @@
     "dsh-plugin",
     "deepseek-harness",
     "ai-radar",
-    "hacker-news"
+    "hacker-news",
+    "industry-news"
   ]
 }

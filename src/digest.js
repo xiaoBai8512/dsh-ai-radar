@@ -194,7 +194,7 @@ export async function buildDigest({ config, state, log, force = false, reason, s
       const fingerprint = tweet.text.replace(/\s+/g, ' ').trim().slice(0, 70).toLowerCase()
       if (dedupeText.has(fingerprint)) continue
       dedupeText.add(fingerprint)
-      const scored = scoreTweet(tweet, account, { state, baselineEngagement: baseline, now })
+      const scored = scoreTweet(tweet, account, { state, baselineEngagement: baseline, now, matchers: config.matchers })
       candidates.push({ tweet, account, ...scored })
     }
   }
@@ -241,6 +241,7 @@ export async function buildDigest({ config, state, log, force = false, reason, s
 
   const summary = {
     at: new Date(now).toISOString(),
+    industry: config.industry?.label ?? '',
     reason: firstRun ? 'first-run' : reason ?? (force ? 'manual' : 'scheduled'),
     windowHours,
     accounts: config.accounts.length,

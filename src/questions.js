@@ -18,11 +18,22 @@ const MAX_POOL_FOR_MODEL = 90
 const X_QUOTA = 30
 const MAX_TOKENS = 2600
 
-const CLUSTER_PROMPT = `你是内容策划，服务一个做 AI 科普内容（「白科闪点」）的作者。输入是一批真实评论/回复（来自 X 和 Hacker News），每条有 id。
+/**
+ * The clustering standard follows the pack: the same question pool means a
+ * different thing in a tooling vertical than in, say, skincare. With no seeds
+ * supplied, fall back to the generic shape of a useful question.
+ */
+export const buildClusterPrompt = (industry) => {
+  const label = typeof industry?.label === 'string' && industry.label.trim().length > 0 ? industry.label.trim() : 'AI 行业'
+  const seeds = Array.isArray(industry?.questionSeeds) ? industry.questionSeeds.filter((seed) => typeof seed === 'string' && seed.trim().length > 0) : []
+  const focus = seeds.length > 0
+    ? `只聚这类：${seeds.join('、')}。`
+    : '只聚：具体可复现的困难、真实的选择与代价、踩过的坑；能回答「我遇到这个该怎么办」的那类问题。'
+  return `你是内容策划，服务一个做「${label}」内容的作者。输入是一批真实评论/回复，每条有 id。
 
-任务：找出反复出现的**工具实操与踩坑**问题，聚成 3~5 类，给作者能直接开做的选题。
+任务：找出反复出现的**具体困难与选择**问题，聚成 3~5 类，给作者能直接开做的选题。
 
-只聚这类：怎么装/怎么配/怎么迁移、报错与不生效、速度与性能、配额与价格、上下文限制、几个工具怎么选。
+${focus}
 不聚：纯情绪、立场争论、商业分析、纯理论、单纯夸赞。
 
 规则：
@@ -34,6 +45,7 @@ const CLUSTER_PROMPT = `你是内容策划，服务一个做 AI 科普内容（�
 {"overall":"这批评论反映的整体情况，≤40 字",
  "themes":[{"theme":"这一类在问什么/踩什么坑，≤18 字，中文","angle":"可直接开做的选题角度，≤40 字","qs":["属于这一类的 id 全部列上"],"examples":["1~2 条最典型的原文，翻译成中文，≤60 字"]}]}
 只输出 JSON，不要 Markdown 代码块。`
+}
 
 const QUESTION_START =
   /^(how|why|what|when|where|which|who|can|could|do|does|did|is|are|was|were|should|would|will|anyone|anybody|has|have|is there|are there)\b/i
@@ -156,6 +168,7 @@ export async function clusterQuestions({ pool, config, llm, agentDefaultModel, l
   const route = await resolveEditorRoute({ llm, config, agentDefaultModel, log })
   if (!route) return { ok: false, error: 'no model route' }
 
+  const system = buildClusterPrompt(config.industry)
   const sample = sampleForModel(pool, CLUSTER_SAMPLE)
   const comments = sample.map((entry, index) => ({
     id: `q${index + 1}`,
@@ -169,7 +182,7 @@ export async function clusterQuestions({ pool, config, llm, agentDefaultModel, l
     clustered = await callJson({
       llm,
       route,
-      system: CLUSTER_PROMPT,
+      system,
       payload: { comments: attempt },
       maxTokens: CLUSTER_MAX_TOKENS,
       signal,

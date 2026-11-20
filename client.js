@@ -41,6 +41,19 @@ window.__ModuleLoader__.load({
         qMentions: '条提到',
         qSource: '看原帖',
         noData: '还没有抓取结果，稍等第一轮抓取完成。',
+        industry: '行业',
+        editIndustry: '设置行业',
+        industryHint: '改行业名、关键词和信源账号。保存会清空旧日报并重新抓一轮。',
+        nameLabel: '行业名',
+        keywordsLabel: '关键词（一行一个，用来判断一条帖子算不算这个话题）',
+        brandsLabel: '专有名词（可选，用来判断「新信号」，例如产品名、型号）',
+        accountsLabel: '信源账号（每行一个 @handle，可在后面加 ,1 / ,2 / ,3 表示权重档）',
+        hnLabel: 'Hacker News 查询（一行一个，留空即关闭；只有科技行业有意义）',
+        save: '保存并重新抓取',
+        saving: '保存中…',
+        cancel: '取消',
+        saveFailed: '保存失败',
+        needAccounts: '至少需要一个信源账号，否则没有可抓的内容。',
         categories: {
           'model-release': '模型发布',
           research: '论文与基准',
@@ -75,6 +88,19 @@ window.__ModuleLoader__.load({
         qMentions: 'mentions',
         qSource: 'Post',
         noData: 'No fetch yet; the first pass is on its way.',
+        industry: 'Industry',
+        editIndustry: 'Set industry',
+        industryHint: 'Change the name, keywords and sources. Saving clears the current digest and refetches.',
+        nameLabel: 'Industry name',
+        keywordsLabel: 'Keywords (one per line; decides whether a post is on topic)',
+        brandsLabel: 'Named products (optional, for the novelty check, e.g. product or model names)',
+        accountsLabel: 'Sources (one @handle per line; append ,1 / ,2 / ,3 for tier)',
+        hnLabel: 'Hacker News queries (one per line; empty disables it, only useful for tech)',
+        save: 'Save and refetch',
+        saving: 'Saving…',
+        cancel: 'Cancel',
+        saveFailed: 'Save failed',
+        needAccounts: 'At least one source account is required, or there is nothing to fetch.',
         categories: {
           'model-release': 'Model release',
           research: 'Paper / benchmark',
@@ -205,6 +231,13 @@ window.__ModuleLoader__.load({
       .dsh-air-reason { font-size: 10px; padding: 2px 6px; border-radius: 6px; color: var(--dsw-alias-label-secondary); background: var(--dsw-alias-bg-layer-1); border: 1px solid var(--dsw-alias-border-l1); }
       .dsh-air-metrics { margin-top: 5px; font-size: 10.5px; color: var(--dsw-alias-label-secondary); }
       .dsh-air-empty { padding: 22px 16px 26px; text-align: center; font-size: 12px; color: var(--dsw-alias-label-secondary); line-height: 1.6; }
+      .dsh-air-form { padding: 0 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+      .dsh-air-field { display: flex; flex-direction: column; gap: 4px; }
+      .dsh-air-field label { font-size: 11px; color: var(--dsw-alias-label-secondary); }
+      .dsh-air-input, .dsh-air-textarea { font-family: inherit; font-size: 12px; line-height: 1.45; padding: 7px 9px; border-radius: 8px; border: 1px solid var(--dsw-alias-border-l1); background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); width: 100%; box-sizing: border-box; }
+      .dsh-air-textarea { min-height: 84px; resize: vertical; }
+      .dsh-air-form-actions { display: flex; gap: 8px; justify-content: flex-end; }
+      .dsh-air-error { font-size: 11.5px; line-height: 1.45; color: var(--dsw-alias-label-secondary); }
     `
 
     function Item({ item, t }) {
@@ -259,6 +292,78 @@ window.__ModuleLoader__.load({
       )
     }
 
+    function IndustryForm({ t, industry, onCancel, onSaved }) {
+      const [label, setLabel] = useState(industry.label || '')
+      const [keywords, setKeywords] = useState((industry.keywords || []).join('\n'))
+      const [brands, setBrands] = useState((industry.brands || []).join('\n'))
+      const [accounts, setAccounts] = useState(
+        (industry.accounts || []).map((account) => `${account.handle}${account.tier && account.tier !== 2 ? `,${account.tier}` : ''}`).join('\n'),
+      )
+      const [hn, setHn] = useState(((industry.hn && industry.hn.queries) || []).join('\n'))
+      const [saving, setSaving] = useState(false)
+      const [error, setError] = useState(null)
+
+      const save = async () => {
+        if (accounts.trim().length === 0) {
+          setError(t('needAccounts'))
+          return
+        }
+        setSaving(true)
+        setError(null)
+        try {
+          const response = await fetch(`${API}/industry`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', accept: 'application/json' },
+            body: JSON.stringify({
+              id: industry.id || 'custom',
+              label,
+              keywords,
+              brands,
+              accounts,
+              hn: { enabled: hn.trim().length > 0, queries: hn },
+            }),
+          })
+          if (!response.ok) {
+            const payload = await response.json().catch(() => ({}))
+            throw new Error(payload.error || `HTTP ${response.status}`)
+          }
+          onSaved()
+        } catch (err) {
+          setError(`${t('saveFailed')}: ${err && err.message ? err.message : String(err)}`)
+        } finally {
+          setSaving(false)
+        }
+      }
+
+      const field = (key, value, setValue, textarea) =>
+        h(
+          'div',
+          { className: 'dsh-air-field', key },
+          h('label', null, t(key)),
+          textarea
+            ? h('textarea', { className: 'dsh-air-textarea', value, spellCheck: false, onChange: (event) => setValue(event.target.value) })
+            : h('input', { className: 'dsh-air-input', value, onChange: (event) => setValue(event.target.value) }),
+        )
+
+      return h(
+        'div',
+        { className: 'dsh-air-form' },
+        h('div', { className: 'dsh-air-hint', style: { padding: '0 0 2px' } }, t('industryHint')),
+        field('nameLabel', label, setLabel, false),
+        field('keywordsLabel', keywords, setKeywords, true),
+        field('brandsLabel', brands, setBrands, true),
+        field('accountsLabel', accounts, setAccounts, true),
+        field('hnLabel', hn, setHn, true),
+        error ? h('div', { className: 'dsh-air-error' }, error) : null,
+        h(
+          'div',
+          { className: 'dsh-air-form-actions' },
+          h('button', { className: 'dsh-air-btn', type: 'button', onClick: onCancel, disabled: saving }, t('cancel')),
+          h('button', { className: 'dsh-air-btn', type: 'button', onClick: save, disabled: saving }, saving ? t('saving') : t('save')),
+        ),
+      )
+    }
+
     function AiRadar({ t, onBack }) {
       const [view, setView] = useState(() => {
         try {
@@ -270,6 +375,7 @@ window.__ModuleLoader__.load({
       const [data, setData] = useState(null)
       const [error, setError] = useState(null)
       const [busy, setBusy] = useState(false)
+      const [editing, setEditing] = useState(false)
       const alive = useRef(true)
 
       const load = useCallback(async () => {
@@ -289,16 +395,12 @@ window.__ModuleLoader__.load({
       useEffect(() => {
         alive.current = true
         load()
+        const timer = setInterval(load, 5 * 60 * 1000)
         return () => {
           alive.current = false
+          clearInterval(timer)
         }
       }, [load])
-
-      const pollingFast = Boolean(data?.running || busy || !data?.updatedAt)
-      useEffect(() => {
-        const timer = setInterval(load, pollingFast ? 2000 : 60_000)
-        return () => clearInterval(timer)
-      }, [load, pollingFast])
 
       useEffect(() => {
         try {
@@ -373,10 +475,19 @@ window.__ModuleLoader__.load({
               { className: 'dsh-air-actions' },
               h(
                 'button',
+                {
+                  className: 'dsh-air-btn',
+                  type: 'button',
+                  onClick: () => setEditing((value) => !value),
+                  'aria-pressed': editing,
+                  title: t('industryHint'),
+                },
+                t('editIndustry'),
+              ),
+              h(
+                'button',
                 { className: 'dsh-air-btn', type: 'button', onClick: refresh, disabled: busy || (data && data.running) },
-                busy || data?.running
-                  ? [t('refreshing'), data?.progress ? `${data.progress.index}/${data.progress.total}` : ''].filter(Boolean).join(' ')
-                  : t('refresh'),
+                busy || (data && data.running) ? t('refreshing') : t('refresh'),
               ),
               h('button', { className: 'dsh-air-btn', type: 'button', onClick: onBack }, t('back')),
             ),
@@ -386,7 +497,7 @@ window.__ModuleLoader__.load({
             { className: 'dsh-air-hint' },
             data
               ? view === 'digest'
-                ? `${(data.accounts || []).length} ${t('accounts')} · ${t('threshold')} ${data.threshold ?? '?'} · ${count}/${data.maxItems ?? '?'}`
+                ? `${data.industry ? `${data.industry.label} · ` : ''}${(data.accounts || []).length} ${t('accounts')} · ${t('threshold')} ${data.threshold ?? '?'} · ${count}/${data.maxItems ?? '?'}`
                 : `${t('qPool')} ${questions.poolSize ?? 0} ${t('qPoolUnit')}${questions.at ? ` · ${updatedLabel}` : ''}`
               : t('loading'),
           ),
@@ -396,6 +507,16 @@ window.__ModuleLoader__.load({
             : null,
           error
             ? h('div', { className: 'dsh-air-empty' }, `${t('failed')}: ${error}`)
+            : editing && data && data.industry
+              ? h(IndustryForm, {
+                  t,
+                  industry: data.industry,
+                  onCancel: () => setEditing(false),
+                  onSaved: async () => {
+                    setEditing(false)
+                    await load()
+                  },
+                })
             : view === 'questions'
               ? themes.length === 0
                 ? h(

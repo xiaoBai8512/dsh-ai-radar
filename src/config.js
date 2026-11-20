@@ -1,6 +1,6 @@
-/** Normalized runtime configuration for the AI Radar host half. */
+/** Normalized runtime configuration for the radar host half. */
 
-import { DEFAULT_ACCOUNTS } from './watchlist.js'
+import { createMatchers, loadIndustry, normalizeIndustry } from './industry.js'
 
 const clampInt = (value, min, max, fallback) => {
   const n = Number(value)
@@ -23,14 +23,40 @@ const normalizeAccount = (entry, index) => {
   }
 }
 
-export function normalizeConfig(raw) {
+/**
+ * Merge the industry pack with the legacy flat config.
+ *
+ * The pack is the default; a profile that still spells out `accounts`,
+ * `hnQueries` or `keywords` wins for those fields, so an existing install keeps
+ * behaving exactly as it did before packs existed.
+ */
+function mergeIndustry(source, stored) {
+  const base = stored && typeof stored === 'object' ? stored : { ...DEFAULT_INDUSTRY }
+  const overrides = {}
+  if (Array.isArray(source.accounts) && source.accounts.length > 0) overrides.accounts = source.accounts
+  if (Array.isArray(source.hnQueries) && source.hnQueries.length > 0) {
+    overrides.hn = { enabled: source.hn !== false, queries: source.hnQueries }
+  }
+  if (Array.isArray(source.keywords) && source.keywords.length > 0) overrides.keywords = source.keywords
+  if (Array.isArray(source.brands) && source.brands.length > 0) overrides.brands = source.brands
+  if (typeof source.industryLabel === 'string' && source.industryLabel.trim().length > 0) {
+    overrides.label = source.industryLabel.trim()
+  }
+  return normalizeIndustry({ ...base, ...overrides })
+}
+
+export function normalizeConfig(raw, options = {}) {
   const source = raw && typeof raw === 'object' ? raw : {}
-  const accounts = Array.isArray(source.accounts)
-    ? source.accounts.map(normalizeAccount).filter(Boolean)
-    : DEFAULT_ACCOUNTS.map((entry, index) => normalizeAccount(entry, index))
+  const stored = options.industry !== undefined ? options.industry : loadIndustry(source)
+  const industry = mergeIndustry(source, stored)
+  const accounts = industry.accounts.map((entry, index) => normalizeAccount(entry, index)).filter(Boolean)
+  const hnQueries = industry.hn.queries
   return {
     enabled: source.enabled !== false,
-    accounts: accounts.length > 0 ? accounts : DEFAULT_ACCOUNTS.map((entry, index) => normalizeAccount(entry, index)),
+    industry,
+    matchers: createMatchers(industry),
+    industryLabel: industry.label,
+    accounts,
     refreshHour: clampInt(source.refreshHour ?? 9, 0, 23, 9),
     maxItems: clampInt(source.maxItems ?? 6, 1, 12, 6),
     maxPerAuthor: clampInt(source.maxPerAuthor ?? 2, 1, 6, 2),
@@ -46,10 +72,8 @@ export function normalizeConfig(raw) {
     questionPoolDays: clampInt(source.questionPoolDays ?? 7, 1, 30, 7),
     questionClusters: clampInt(source.questionClusters ?? 5, 1, 10, 5),
     questionRefetchHours: clampInt(source.questionRefetchHours ?? 72, 1, 720, 72),
-    hn: source.hn !== false,
-    hnQueries: Array.isArray(source.hnQueries) && source.hnQueries.length > 0
-      ? source.hnQueries.filter((query) => typeof query === 'string' && query.trim().length > 0)
-      : ['claude code', 'cursor', 'llm api', 'ollama', 'llama.cpp', 'vllm'],
+    hn: source.hn !== false && industry.hn.enabled && hnQueries.length > 0,
+    hnQueries,
     hnDays: clampInt(source.hnDays ?? 7, 1, 30, 7),
     hnPerQuery: clampInt(source.hnPerQuery ?? 60, 10, 100, 60),
     editorThreshold: clampInt(source.editorThreshold ?? 6, 0, 10, 6),
@@ -59,4 +83,16 @@ export function normalizeConfig(raw) {
     cacheMinutes: clampInt(source.cacheMinutes ?? 50, 5, 720, 50),
     dataDir: typeof source.dataDir === 'string' && source.dataDir.trim().length > 0 ? source.dataDir.trim() : undefined,
   }
+}
+
+/** Re-point a live config at an edited pack without rebuilding everything. */
+export function applyIndustry(config, industry) {
+  const pack = normalizeIndustry(industry)
+  config.industry = pack
+  config.industryLabel = pack.label
+  config.matchers = createMatchers(pack)
+  config.accounts = pack.accounts
+  config.hnQueries = pack.hn.queries
+  config.hn = pack.hn.enabled && pack.hn.queries.length > 0
+  return config
 }

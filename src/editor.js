@@ -13,7 +13,12 @@ const MAX_POST_CHARS = 600
 const RETRY_POST_CHARS = 260
 const MAX_TOKENS = 4000
 
-const SYSTEM_PROMPT = `你是「AI 雷达」的编辑，服务一个对 AI 好奇、平时动手做东西的工程读者。目标只有一个：从他的信息流里挑出他刷到会停下来的帖子，而不是做一份行业简报。
+export const buildSystemPrompt = (industry) => {
+  const label = typeof industry?.label === 'string' && industry.label.trim().length > 0 ? industry.label.trim() : 'AI 行业'
+  return SYSTEM_PROMPT_TEMPLATE.replaceAll('{label}', label)
+}
+
+const SYSTEM_PROMPT_TEMPLATE = `你是「{label}雷达」的编辑，服务一个长期在{label}一线、会亲手验证的读者。目标只有一个：从他的信息流里挑出他刷到会停下来的帖子，而不是做一份行业简报。
 
 判断顺序：
 1. 先问：这条有没有钩子？只有带钩子的才可能入选。钩子就是会让人「哦这个有意思」的东西：反直觉的结论、自己跑出来的实测数据、观点冲突或当场对线、能被立刻上手的玩法或小工具、行业内幕与一线吐槽、真正改变认知的突破。
@@ -28,7 +33,7 @@ const SYSTEM_PROMPT = `你是「AI 雷达」的编辑，服务一个对 AI 好�
 - value：0~10，「这个人愿意点开的程度」。9-10 强钩子且可信，今天必看；7-8 有明确钩子；5-6 有点意思但可有可无；0-4 例行内容
 - hook：钩子类型，只能取 争议、实测、新玩法、内幕、突破、观点、工具 之一
 - why：一句话说清钩子是什么，不超过 30 字，必须具体（点出反直觉在哪、数字是多少、跟谁对线），禁止「内容很有价值」「值得关注」这类空话
-- zh：中文译文。忠实原文、口语化、不加原文没有的评论；模型名、基准名、公司名、数字保留原文写法；原文已是中文就给润色版；不超过 120 字
+- zh：中文译文。忠实原文、口语化、不加原文没有的评论；专有名词、型号、品牌名、数字保留原文写法；原文已是中文就给润色版；不超过 120 字
 
 另外给一句 overall：这批候选整体怎么样，不超过 40 字，可以说「今天没什么硬货」。
 只输出一个 JSON 对象，不要 Markdown 代码块，不要解释。格式：
@@ -124,12 +129,12 @@ const buildPrompt = (batch, maxChars) => {
   return JSON.stringify({ candidates }, null, 1)
 }
 
-const askModel = async ({ llm, route, batch, maxChars, signal }) => {
+const askModel = async ({ llm, route, batch, maxChars, system, signal }) => {
   const { text, finishKind } = await collectText(
     llm.stream({
       provider: route.provider,
       model: route.model,
-      system: SYSTEM_PROMPT,
+      system,
       messages: [{ role: 'user', content: [{ type: 'text', text: buildPrompt(batch, maxChars) }] }],
       maxTokens: MAX_TOKENS,
       temperature: 0.15,
@@ -145,11 +150,11 @@ const askModel = async ({ llm, route, batch, maxChars, signal }) => {
 }
 
 /** One batch, with one shorter-prompt retry when the reply is unusable. */
-async function runBatch({ llm, route, batch, signal, log }) {
+async function runBatch({ llm, route, batch, system, signal, log }) {
   let lastError = 'unknown'
   for (const maxChars of [MAX_POST_CHARS, RETRY_POST_CHARS]) {
     try {
-      const result = await askModel({ llm, route, batch, maxChars, signal })
+      const result = await askModel({ llm, route, batch, maxChars, system, signal })
       if (result.ok) return result
       lastError = result.error
       log?.(`editor batch failed (${result.error}), retrying shorter`)
@@ -171,6 +176,7 @@ export async function runEditor({ shortlist, config, llm, agentDefaultModel, log
   const route = await resolveEditorRoute({ llm, config, agentDefaultModel, log })
   if (!route) return { ok: false, error: 'no editor model route' }
 
+  const system = buildSystemPrompt(config.industry)
   const batchSize = Math.max(1, config.editorBatchSize)
   const batchCount = Math.ceil(shortlist.length / batchSize)
   if (batchCount > 1) log?.(`editor: ${shortlist.length} candidates in ${batchCount} batches`)
@@ -180,7 +186,7 @@ export async function runEditor({ shortlist, config, llm, agentDefaultModel, log
   const errors = []
   for (let index = 0; index < shortlist.length; index += batchSize) {
     const batch = shortlist.slice(index, index + batchSize)
-    const result = await runBatch({ llm, route, batch, signal, log })
+    const result = await runBatch({ llm, route, batch, system, signal, log })
     if (!result.ok) {
       errors.push(result.error)
       continue

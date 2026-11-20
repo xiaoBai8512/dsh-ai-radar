@@ -34,9 +34,9 @@ const RESEARCH = /\b(arxiv|paper|benchmark|bench|eval\w*|dataset|sota|ablation)\
 const ENGINEERING = /\b(github|repo|open[- ]?source|mit license|library|sdk|api|cli|docker|pip install|npm i|git clone|self[- ]host)\b/i
 const DATAISH = /(\d+\s?%|\d+(?:\.\d+)?\s?x\b|×|\b\d+(?:\.\d+)?\s?(?:tokens?|b|m|k)\b|\baccuracy\b|\bscore\b|\blatency\b|\bms\b|\bthroughput\b|SOTA)/i
 const CODEISH = /```|npm i\b|pip install\b|git clone\b|curl \b|^import |^from .* import /im
-const CORE = /\b(ai|a\.i\.|llm|llms|agent|agents|agentic|model|models|inference|training|pretrain\w*|transformer|prompt\w*|rag|fine[- ]?tun\w*|benchmark|eval\w*|token\w*|context window|open[- ]?source|dataset|embedding|gpu|cuda|rlhf|reasoning|multimodal|diffusion|attention|latent|scaling|reward|policy|distill\w*|quantiz\w*|moe|mixture of experts|vision|speech|robotics|code|arxiv|paper|智能体|大模型|推理|训练|微调|开源|基准|多模态|架构)\b/gi
-
-const MODEL_TERM = /\b(?:gpt|claude|gemini|llama|qwen|deepseek|mistral|grok|phi|kimi|glm|ernie|minimax|command|nova|o[1-9])\b[-.\s]?[0-9][\w.]{0,12}/gi
+// The vertical's own vocabulary lives in the industry pack (src/industry.js),
+// so nothing here names a field. What stays global is the shape of a checkable
+// claim: a version number, a benchmark name, an all-caps acronym.
 const BENCH_TERM = /\b[a-z0-9]{2,20}-?(?:bench|benchmark|eval)\b/gi
 const ACRONYM = /\b[A-Z]{3,6}\b/g
 const DULL_ACRONYMS = new Set(['API', 'GPU', 'CPU', 'LLM', 'IDE', 'CLI', 'SDK', 'USD', 'CEO', 'CTO', 'PDF', 'URL', 'USA', 'NEW', 'THE', 'AND', 'AI', 'RIP', 'FAQ'])
@@ -44,10 +44,12 @@ const DULL_ACRONYMS = new Set(['API', 'GPU', 'CPU', 'LLM', 'IDE', 'CLI', 'SDK', 
 /** Salient, checkable terms: the only thing novelty is allowed to key on. */
 const ASCII_DASHES = /[\u2010-\u2015\u2212]/g
 
-export function extractTerms(text) {
+export function extractTerms(text, matchers) {
   const terms = new Set()
   const normalized = text.replace(ASCII_DASHES, '-')
-  for (const match of normalized.matchAll(MODEL_TERM)) terms.add(match[0].toLowerCase().replace(/\s+/g, '-'))
+  if (matchers?.brand) {
+    for (const match of normalized.matchAll(matchers.brand)) terms.add(match[0].toLowerCase().replace(/\s+/g, '-'))
+  }
   for (const match of normalized.matchAll(BENCH_TERM)) terms.add(match[0].toLowerCase())
   for (const match of normalized.matchAll(ACRONYM)) {
     const acronym = match[0].toLowerCase()
@@ -107,8 +109,8 @@ function heatSignal(tweet, baselineEngagement) {
   return { score, ratio, engagement }
 }
 
-function noveltySignal(tweet, state, now) {
-  const terms = extractTerms(tweet.text)
+function noveltySignal(tweet, state, now, matchers) {
+  const terms = extractTerms(tweet.text, matchers)
   const fresh = terms.filter((term) => !state.terms[term])
   const termScore = terms.length > 0 ? fresh.length / terms.length : 0
   const launchBonus = LAUNCH.test(tweet.text) ? 1 : RESEARCH.test(tweet.text) ? 0.6 : 0.25
@@ -136,16 +138,18 @@ function discussionSignal(tweet) {
   return { score: clamp01(replyRatio * 2.4 + quoteRatio * 1.6), replyRatio }
 }
 
-function relevanceSignal(tweet, account) {
-  const hits = new Set((tweet.text.match(CORE) ?? []).map((hit) => hit.toLowerCase()))
+function relevanceSignal(tweet, account, matchers) {
+  const hits = new Set(matchers?.relevance ? [...tweet.text.matchAll(matchers.relevance)].map((hit) => hit[0].toLowerCase()) : [])
   let score = clamp01(hits.size * 0.16)
   if (account.tier === 1) score = clamp01(score + 0.3)
   else if (account.tier === 2) score = clamp01(score + 0.12)
   return score
 }
 
+// Neutral keys: the label is the client's job and the pack decides the field,
+// so a beauty pack should not have to publish "model-release" anywhere.
 const CATEGORY = (tweet, account, replyRatio) => {
-  if (account.tier === 1 && LAUNCH.test(tweet.text)) return 'model-release'
+  if (account.tier === 1 && LAUNCH.test(tweet.text)) return 'release'
   if (RESEARCH.test(tweet.text)) return 'research'
   if (ENGINEERING.test(tweet.text)) return 'engineering'
   if (replyRatio > 0.18) return 'debate'
@@ -156,12 +160,12 @@ const CATEGORY = (tweet, account, replyRatio) => {
  * Score one gated post.
  * @returns {{ score: number, parts: object, reasons: { key: string, params?: object }[], category: string }}
  */
-export function scoreTweet(tweet, account, { state, baselineEngagement, now }) {
+export function scoreTweet(tweet, account, { state, baselineEngagement, now, matchers }) {
   const heat = heatSignal(tweet, baselineEngagement)
-  const novelty = noveltySignal(tweet, state, now)
+  const novelty = noveltySignal(tweet, state, now, matchers)
   const density = densitySignal(tweet)
   const discussion = discussionSignal(tweet)
-  const relevance = relevanceSignal(tweet, account)
+  const relevance = relevanceSignal(tweet, account, matchers)
   const parts = {
     heat: heat.score,
     novelty: novelty.score,
